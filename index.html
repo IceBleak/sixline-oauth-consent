@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>六行宇宙｜OAuth 授權</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #18211f; background: #f4f7f5; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; box-sizing: border-box; }
+    main { width: min(100%, 560px); background: white; border: 1px solid #dce5df; border-radius: 18px; padding: 28px; box-shadow: 0 12px 36px #183a2b12; box-sizing: border-box; }
+    h1 { margin: 0 0 8px; font-size: 1.5rem; } p { line-height: 1.65; }
+    .muted { color: #53645c; font-size: .94rem; }
+    label { display: block; font-weight: 650; margin: 16px 0 6px; }
+    input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #b8c8bf; border-radius: 9px; font: inherit; }
+    button { border: 0; border-radius: 9px; padding: 12px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .primary { background: #176b4d; color: white; } .secondary { background: #e9efeb; color: #1b3026; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .panel { border: 1px solid #dce5df; background: #f8faf9; border-radius: 12px; padding: 14px; margin: 16px 0; }
+    .status { padding: 12px; border-radius: 9px; background: #f0f4f1; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .danger { color: #8a2727; } .hidden { display: none; }
+    footer { margin-top: 22px; font-size: .82rem; color: #627168; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>六行宇宙｜授權確認</h1>
+  <p class="muted">請先登入六行宇宙使用的 Supabase 帳號，再確認是否授權下列應用程式。只有你按下「同意」後，才會批准本次 OAuth 請求。</p>
+  <div id="status" class="status">正在載入設定……</div>
+
+  <section id="login" class="hidden">
+    <h2>登入</h2>
+    <p class="muted">使用你的六行宇宙 Supabase 帳號。此頁不會要求或收集 Supabase 管理員金鑰。</p>
+    <form id="login-form">
+      <label for="email">電子郵件</label><input id="email" type="email" autocomplete="email" required>
+      <label for="password">密碼</label><input id="password" type="password" autocomplete="current-password" required>
+      <div class="actions"><button class="primary" type="submit">登入並繼續</button></div>
+    </form>
+  </section>
+
+  <section id="consent" class="hidden">
+    <h2>要求授權的應用程式</h2>
+    <div class="panel">
+      <p><strong id="client-name">（載入中）</strong></p>
+      <p>要求的權限：<span id="scopes">（載入中）</span></p>
+      <p class="muted">請確認應用程式名稱與權限符合你的預期。若不確定，請選擇拒絕。</p>
+    </div>
+    <div class="actions">
+      <button id="approve" class="primary" type="button">同意並繼續</button>
+      <button id="deny" class="secondary" type="button">拒絕</button>
+    </div>
+  </section>
+
+  <footer>六行宇宙 OAuth 授權頁。不要在此輸入或分享服務角色金鑰（service_role key）。</footer>
+</main>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // Fill these two values after creating the site. The publishable/anon key is intended
+  // for browser use; never put a service_role key here.
+  const SUPABASE_URL = 'https://lvpphnnjcqjsoaykchhi.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'PASTE_YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY_HERE';
+
+  const $ = (id) => document.getElementById(id);
+  const status = (message, error = false) => {
+    $('status').textContent = message;
+    $('status').classList.toggle('danger', error);
+  };
+  const params = new URLSearchParams(location.search);
+  const authorizationId = params.get('authorization_id');
+  const redirectPath = location.pathname + location.search + location.hash;
+  const supabaseConfigured = SUPABASE_PUBLISHABLE_KEY &&
+    !SUPABASE_PUBLISHABLE_KEY.startsWith('PASTE_');
+
+  if (!supabaseConfigured) {
+    status('尚未完成設定：請將 SUPABASE_PUBLISHABLE_KEY 替換為 Supabase 專案的 publishable key（或舊版 anon public key）。不要使用 service_role key。', true);
+  } else if (!authorizationId) {
+    status('缺少 authorization_id。此頁只有在 OAuth 授權流程導入時才能使用。');
+  } else {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
+
+    async function load() {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        $('login').classList.remove('hidden');
+        status('請先登入，登入成功後會返回這個授權請求。');
+        return;
+      }
+
+      const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(authorizationId);
+      if (error || !data) {
+        status('無法讀取授權要求：' + (error?.message || '沒有收到授權詳細資料'), true);
+        return;
+      }
+
+      if (!('authorization_id' in data)) {
+        if (data.redirect_url) location.assign(data.redirect_url);
+        else status('此授權已處理，但沒有收到重新導向網址。', true);
+        return;
+      }
+
+      $('client-name').textContent = data.client?.name || data.client_name || '未命名應用程式';
+      $('scopes').textContent = data.scope || '(未指定)';
+      $('consent').classList.remove('hidden');
+      status('請仔細檢查應用程式名稱與權限，再選擇同意或拒絕。');
+    }
+
+    $('login-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = $('email').value.trim();
+      const password = $('password').value;
+      status('正在登入……');
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) { status('登入失敗：' + error.message, true); return; }
+      location.assign(redirectPath);
+    });
+
+    $('approve').addEventListener('click', async () => {
+      $('approve').disabled = true; $('deny').disabled = true;
+      status('正在提交授權……');
+      const { data, error } = await supabase.auth.oauth.approveAuthorization(authorizationId);
+      if (error) { status('授權失敗：' + error.message, true); $('approve').disabled = false; $('deny').disabled = false; return; }
+      if (data?.redirect_url) location.assign(data.redirect_url);
+      else status('授權已處理，但沒有收到重新導向網址。', true);
+    });
+
+    $('deny').addEventListener('click', async () => {
+      $('approve').disabled = true; $('deny').disabled = true;
+      status('正在拒絕授權……');
+      const { data, error } = await supabase.auth.oauth.denyAuthorization(authorizationId);
+      if (error) { status('拒絕授權時發生錯誤：' + error.message, true); $('approve').disabled = false; $('deny').disabled = false; return; }
+      if (data?.redirect_url) location.assign(data.redirect_url);
+      else status('已拒絕授權，但沒有收到重新導向網址。');
+    });
+
+    load().catch((e) => status('發生未預期錯誤：' + e.message, true));
+  }
+</script>
+</body>
+</html>
