@@ -55,8 +55,22 @@
   <footer>六行宇宙 OAuth 授權頁。不要在此輸入或分享服務角色金鑰（service_role key）。</footer>
 </main>
 
-<script type="module">
-  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+<script>
+(async function initializeOAuthPage() {
+  // Load the SDK dynamically so network/CDN failures become a visible error instead of
+  // leaving the page stuck forever at "正在載入設定……".
+  let createClient;
+  try {
+    ({ createClient } = await import('https://esm.sh/@supabase/supabase-js@2'));
+  } catch (error) {
+    const statusElement = document.getElementById('status');
+    if (statusElement) {
+      statusElement.textContent = '無法載入 Supabase 用戶端程式庫。請重新整理頁面；若持續發生，可能是 CDN 或網路阻擋。詳細資訊：' + (error?.message || String(error));
+      statusElement.classList.add('danger');
+    }
+    console.error('Failed to load Supabase JS SDK:', error);
+    return;
+  }
 
   // Fill these two values after creating the site. The publishable/anon key is intended
   // for browser use; never put a service_role key here.
@@ -139,6 +153,14 @@
 
     load().catch((e) => status('發生未預期錯誤：' + e.message, true));
   }
+})().catch((error) => {
+  const statusElement = document.getElementById('status');
+  if (statusElement) {
+    statusElement.textContent = '授權頁初始化失敗：' + (error?.message || String(error));
+    statusElement.classList.add('danger');
+  }
+  console.error('OAuth page initialization failed:', error);
+});
 </script>
 </body>
 </html>
